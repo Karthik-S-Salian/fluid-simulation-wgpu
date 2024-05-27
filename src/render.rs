@@ -1,7 +1,3 @@
-use std::ops::Mul;
-
-use wgpu::core::device;
-
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -46,7 +42,7 @@ impl Renderer {
 
         render_pass.set_pipeline(&self.display_pipeline);
 
-        render_pass.draw(0..3, 0..1);
+        render_pass.draw(0..6, 0..1);
 
         drop(render_pass);
 

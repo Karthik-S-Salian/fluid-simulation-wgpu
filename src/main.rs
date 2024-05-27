@@ -1,12 +1,5 @@
 use {
     anyhow::{Context, Result},
-    wgpu::{
-        core::{
-            device::{self, queue},
-            instance,
-        },
-        naga::FastHashMap,
-    },
     winit::{
         event::{Event, WindowEvent},
         event_loop::{ControlFlow, EventLoop},
