@@ -8,12 +8,19 @@ use {
 };
 
 mod render;
+mod config;
+mod programs;
+
 
 const WIDTH: u32 = 800;
-const HEIGHT: u32 = 600;
+const HEIGHT: u32 = 800;
 
 #[pollster::main]
 async fn main() -> Result<()> {
+
+    let config = config::Config::default();
+
+
     let event_loop = EventLoop::new()?;
     let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
 
@@ -24,7 +31,7 @@ async fn main() -> Result<()> {
         .build(&event_loop)?;
 
     let (device, queue, surface) = connect_to_gpu(&window).await?;
-    let renderer = render::Renderer::new(device, queue);
+    let renderer = render::Renderer::new(device, queue,config);
 
     event_loop.run(|event, control_handle| {
         control_handle.set_control_flow(ControlFlow::Poll);

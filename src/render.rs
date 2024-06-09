@@ -1,22 +1,68 @@
+use bytemuck::{Pod, Zeroable};
+
+use crate::config;
+
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    config: config::Config,
+    uniforms: Uniforms,
+    uniform_buffer: wgpu::Buffer,
     display_pipeline: wgpu::RenderPipeline,
+    display_bind_group: wgpu::BindGroup,
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C)]
+struct Uniforms {
+    grid_size: f32,
 }
 
 impl Renderer {
-    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Renderer {
+    pub fn new(device: wgpu::Device, queue: wgpu::Queue, config: config::Config) -> Renderer {
         device.on_uncaptured_error(Box::new(|error| {
             panic!("Aborting due to an error: {}", error);
         }));
 
         let shader_module = compile_shader_module(&device);
-        let display_pipeline = create_display_pipeline(&device, &shader_module);
+        let (display_pipeline, display_layout) = create_display_pipeline(&device, &shader_module);
+
+        let uniforms = Uniforms {
+            grid_size: config.grid_size(),
+        };
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uniforms"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: true,
+        });
+        uniform_buffer
+            .slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(bytemuck::bytes_of(&uniforms));
+        uniform_buffer.unmap();
+
+        let display_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &display_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            }],
+        });
 
         Renderer {
             device,
             queue,
+            config,
+            uniforms,
+            uniform_buffer,
             display_pipeline,
+            display_bind_group,
         }
     }
 
@@ -26,6 +72,13 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("render frame"),
             });
+
+        {
+            // let compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            //     label: Some("compute pass"),
+            //     timestamp_writes: None,
+            // });
+        }
 
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("display pass"),
@@ -42,7 +95,12 @@ impl Renderer {
 
         render_pass.set_pipeline(&self.display_pipeline);
 
-        render_pass.draw(0..6, 0..1);
+        render_pass.set_bind_group(0, &self.display_bind_group, &[]);
+
+        render_pass.draw(
+            0..6,
+            0..(&self.config.grid_size() * &self.config.grid_size()) as u32,
+        );
 
         drop(render_pass);
 
@@ -68,10 +126,29 @@ fn compile_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
 fn create_display_pipeline(
     device: &wgpu::Device,
     shader_module: &wgpu::ShaderModule,
-) -> wgpu::RenderPipeline {
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: None,
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("display"),
-        layout: None,
+        layout: Some(
+            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+                ..Default::default()
+            }),
+        ),
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
@@ -95,5 +172,7 @@ fn create_display_pipeline(
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
         multiview: None,
-    })
+    });
+
+    (pipeline, bind_group_layout)
 }
