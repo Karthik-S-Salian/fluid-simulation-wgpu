@@ -1,6 +1,62 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::config;
+use crate::utils;
+
+pub struct StorageBuffer2D {
+    dim: (u64, u64),
+    pub x: wgpu::Buffer,
+    pub y: wgpu::Buffer,
+}
+
+impl StorageBuffer2D {
+    pub fn new(
+        device: &wgpu::Device,
+        dim: (u64, u64),
+        label: Option<&str>,
+        initial_state_x: Option<Vec<i32>>,
+        initial_state_y: Option<Vec<i32>>,
+    ) -> StorageBuffer2D {
+        let size = dim.0 * dim.1;
+        let x = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: size * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: initial_state_x.is_some(),
+        });
+
+        if let Some(state) = initial_state_x {
+            x.slice(..)
+                .get_mapped_range_mut()
+                .copy_from_slice(bytemuck::cast_slice(&state));
+            x.unmap();
+        }
+
+        let y = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: size * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: initial_state_y.is_some(),
+        });
+
+        if let Some(state) = initial_state_y {
+            y.slice(..)
+                .get_mapped_range_mut()
+                .copy_from_slice(bytemuck::cast_slice(&state));
+            y.unmap();
+        }
+
+        StorageBuffer2D { dim, x, y }
+    }
+}
+
+pub struct StorageBuffers {
+    source: StorageBuffer2D,
+    velocity_prvs: StorageBuffer2D,
+    velocity: StorageBuffer2D,
+    density_prvs: StorageBuffer2D,
+    density: StorageBuffer2D,
+}
 
 pub struct Renderer {
     device: wgpu::Device,
@@ -10,6 +66,7 @@ pub struct Renderer {
     uniform_buffer: wgpu::Buffer,
     display_pipeline: wgpu::RenderPipeline,
     display_bind_group: wgpu::BindGroup,
+    storage_buffers: StorageBuffers,
 }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -24,7 +81,15 @@ impl Renderer {
             panic!("Aborting due to an error: {}", error);
         }));
 
-        let shader_module = compile_shader_module(&device);
+        let shader_module = {
+            let code = include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/shaders/render.wgsl"
+            ));
+
+            utils::compile_shader_module(&device, code)
+        };
+
         let (display_pipeline, display_layout) = create_display_pipeline(&device, &shader_module);
 
         let uniforms = Uniforms {
@@ -55,6 +120,28 @@ impl Renderer {
             }],
         });
 
+        let dim = (config.grid_size() as u64, config.grid_size() as u64);
+
+        let storage_buffers: StorageBuffers = StorageBuffers {
+            source: StorageBuffer2D::new(&device, dim, Some("source buffer"), None, None),
+            velocity: StorageBuffer2D::new(&device, dim, Some("velocity buffer"), None, None),
+            velocity_prvs: StorageBuffer2D::new(
+                &device,
+                dim,
+                Some("velocity_prvs buffer"),
+                None,
+                None,
+            ),
+            density: StorageBuffer2D::new(&device, dim, Some("density buffer"), None, None),
+            density_prvs: StorageBuffer2D::new(
+                &device,
+                dim,
+                Some("density_prvs buffer"),
+                None,
+                None,
+            ),
+        };
+
         Renderer {
             device,
             queue,
@@ -63,6 +150,7 @@ impl Renderer {
             uniform_buffer,
             display_pipeline,
             display_bind_group,
+            storage_buffers,
         }
     }
 
@@ -107,20 +195,6 @@ impl Renderer {
         let commmand_buffer = encoder.finish();
         self.queue.submit(Some(commmand_buffer));
     }
-}
-
-fn compile_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
-    use std::borrow::Cow;
-
-    let code = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/shaders/render.wgsl"
-    ));
-
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("render"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(code)),
-    })
 }
 
 fn create_display_pipeline(
@@ -176,3 +250,5 @@ fn create_display_pipeline(
 
     (pipeline, bind_group_layout)
 }
+
+fn create_buffers() {}

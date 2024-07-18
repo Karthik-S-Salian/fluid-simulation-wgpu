@@ -10,6 +10,7 @@ use {
 mod render;
 mod config;
 mod programs;
+mod utils;
 
 
 const WIDTH: u32 = 800;
